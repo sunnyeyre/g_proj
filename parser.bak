@@ -1,0 +1,153 @@
+#include <vector>
+#include <iostream>
+#include <fstream>
+#include <cmath>
+#include <string>
+#include <sstream>
+#include <map>
+
+#include "header.h"
+
+#ifdef _WIN32
+#	include <windows.h>
+#else
+#	include <sys/time.h>
+#endif
+
+#ifdef OSX
+#include <GLUT/glut.h>
+#include <OpenGL/glu.h>
+#else
+#include <GL/glut.h>
+#include <GL/glu.h>
+#endif
+
+#include <time.h>
+#include <math.h>
+
+#define PI 3.14159265
+
+using namespace std;
+
+void parser::split(string s, string delimiter, vector<string> &array) {
+	int cutAt;
+	while( (cutAt = s.find_first_of(delimiter)) != s.npos ) {
+		if(cutAt > 0) {
+			array.push_back(s.substr(0,cutAt));
+		}
+		s = s.substr(cutAt+1);
+	}
+	if(s.length() > 0) {
+		array.push_back(s);
+	}
+}
+
+int parser::si (const string &str) {
+	stringstream ss(str);
+	int n;
+	ss >> n;
+	return n;
+}
+
+float parser::sf (const string &str) {
+	stringstream ss(str);
+	float n;
+	ss >> n;
+	return n;
+}
+
+string parser::ps (const string &str) {
+	stringstream ss(str);
+	string mystring;
+	ss >> mystring;
+	return mystring;
+}
+
+int parser::getNumPatches(string file) {
+	ifstream myfile(file.c_str());
+	string line;
+	vector<string> words;
+	int mynum = 0;
+	char* pch = (char*) malloc( sizeof(char) *20);
+	if(myfile.is_open()){
+		getline(myfile,line);
+		split(line, "", words);
+		string::traits_type::copy(pch,words.at(0).c_str(),words.at(0).length());
+		mynum = atoi(pch);
+	}
+	myfile.close();
+	free(pch);
+	return mynum;
+}
+
+void parser::parseBEZ(string file, float** myarray) {
+	ifstream myfile(file.c_str());
+	string line;
+	vec3 anarr;
+	int count =0;
+	int row=0;
+	char* pch = (char*) malloc( sizeof(char) *20);
+	if (myfile.is_open()) {
+		getline(myfile,line); //not sure what the number is for
+		while(!myfile.eof()) {
+			getline(myfile,line);
+			vector<string> words;
+			split(line, " ", words);
+			if(words.size() !=0){ //converts string to floats and puts into array
+				for(int i=0; i<12; i++) {
+					string::traits_type::copy( pch, words.at(i).c_str(), words.at(i).length() +1);
+					myarray[row][i] = atof(pch);
+				}}
+			else
+				break;
+			count++;
+			if(count == 4) {
+				getline(myfile, line);
+				count = 0;
+			}
+			row++;
+		}
+		myfile.close();
+		free(pch);
+	}
+}
+
+void parser::parseOBJ(string file, vector<Triangle> &triangles) {
+	vector<vec3> vertices;
+	ifstream myfile(file.c_str());
+	string line;
+	if (myfile.is_open()) {
+		while(!myfile.eof()) {
+			getline(myfile,line);
+			vector<string> words;
+			split(line, " ", words);
+			if(words.size() != 4 && words.size() !=0){
+				words.empty();
+				split(line, "\t", words);
+			}
+			if(words.size() !=0){
+				if (words[0].compare("v")==0) {
+					vec3 v(sf(words[1]), sf(words[2]), sf(words[3]));
+					vertices.push_back(v);
+  				}
+  				if (words[0].compare("f")==0) {
+						vec3 v1 = vertices[si(words[1])-1];
+						vec3 v2 = vertices[si(words[2])-1];
+						vec3 v3 = vertices[si(words[3])-1];
+	  				vec3 n = (v2-v1) ^ (v3-v1);
+  					Triangle t(v1, v2, v3, n, n, n);
+	  				triangles.push_back(t);
+  				}
+			}
+		}
+		myfile.close();
+	}
+}
+
+bool parser::isBEZ(string file) {
+	return (0 == file.compare(file.length()-4, 4, ".bez"));
+}
+
+bool parser::isOBJ(string file) {
+	return (0 == file.compare(file.length()-4, 4, ".obj"));
+}

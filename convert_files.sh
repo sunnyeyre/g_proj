@@ -1,0 +1,1 @@
+#!/bin/bashecho the script starts now.for i in *.bmpdo mv -i "$i" "frame$i"done

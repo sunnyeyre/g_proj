@@ -1,0 +1,78 @@
+
+# Define C++ compiler
+CCC	      = g++
+
+
+# Define C++ compiler options
+CCCFLAGS      = -Wall -ansi -c -g
+
+# Define C/C++ pre-processor options
+CPPFLAGS      = -I./ -I$(GLUIDIR)/include -I$(GLDIR)/include
+
+# Define location of GLUT directory 
+GLUTDIR       = /usr
+
+# Define location of OpenGL directory 
+GLDIR         = /usr
+
+# Note the GLUI directory is in the same as the GL and GLUT directories,
+# not in the X11R6 directory anymore
+# Define location of GLUI directory
+GLUIDIR       = /usr
+
+# And also note the different library names for the glu, gl, and glut libraries
+# Define location of OpenGL and GLU libraries along with their lib names
+GL_LIBS       = -L/lib -lglu32 -lopengl32 
+
+# Define location of Glut libraries along with glut lib name
+GLUT_LIBS     = -L/lib -lglut32
+
+# Define location of GLUI libraries along with glui lib name
+GLUI_LIBS     = -L/lib -lglui
+
+
+# Define the location of the destination directory for the executable file
+DEST	      = .
+
+# Define flags that should be passed to the linker
+LDFLAGS	      =
+
+# Define libraries to be linked with
+LIBS          = $(GLUI_LIBS) $(GL_LIBS) $(GLUT_LIBS) -lm -ldl
+
+# Define linker
+LINKER	      = g++
+
+# Define all object files to be the same as CPPSRCS but with all the .cpp and .c suffixes replaced with .o
+OBJ           = $(CPPSRCS:.cpp=.o) 
+
+# Define name of target executable
+PROGRAM	      = glut_example.exe
+
+
+# Define all C++ source files here
+CPPSRCS       = glut_example.cpp 
+
+##############################################################################
+# Define additional rules that make should know about in order to compile our
+# files.                                        
+##############################################################################
+
+# Define default rule if Make is run without arguments
+all : $(PROGRAM)
+
+# Define rule for compiling all C++ files
+%.o : %.cpp
+	$(CCC) $(CCCFLAGS) $(CPPFLAGS) $*.cpp
+	
+	
+# Define rule for creating executable
+$(PROGRAM) :	$(OBJ)
+		@echo -n "Linking $(PROGRAM) ... "
+		$(LINKER) $(LDFLAGS) $(OBJ) $(LIBS) -o $(PROGRAM)
+		@echo "done"
+		
+# Define rule to clean up directory by removing all object, temp and core
+# files along with the executable
+clean :
+	@rm -f $(OBJ) *~ core $(PROGRAM)

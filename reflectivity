@@ -1,0 +1,44 @@
+#! /opt/perl5/bin/perl -w
+use ExtUtils::testlib;
+use hfuncs;
+use Math::Complex;
+use Math::Trig;
+
+$delta = 0.1048;
+$beta = 0.0211;
+$sigma = 0.8;
+$deltas = 0.0016;
+$betas =- 0.0112;
+
+$amin = 0.;
+$amax = 178.;
+$steps = $amax+1;
+$lambda = 12.5;
+$hc = 1239.85207;
+$energy = $hc/$lambda;
+$thick = 80.0;
+$pol = 0.8;
+@reflec = ();
+@angle = ();
+print "file name";
+$file = <STDIN>;
+chomp($file);
+open(DAT, "> $file.txt") || die "cannot open $file";
+print "outputing $file.txt ...\n";
+print DAT "Angle(deg)   reflectivity\n";
+
+$i = 0;
+$fl = 0;
+ for(0..$amax) {
+ if($thick > 0) {
+	($reflec[$i]) = hfuncs::layer($delta, $beta, $deltas, $betas, $sigma, $thick, $lambda, $pol, $fl);
+	printf DAT ("%.1f\t%.6f\n", $i/2, $reflec[$i]); }
+	else {
+		print "error: thickness < 0\n";
+		}
+	$i++;
+	$fl = $fl+0.5;
+
+} #ends the for loop
+
+close (DAT);
