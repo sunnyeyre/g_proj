@@ -3,7 +3,7 @@
 #-----------------------------------------
 #Basic Stuff -----------------------------
 BITTINESS = -m32
-CC          = g++ -Wall ${BITTINESS}
+CC          = g++ -Wall ${BITTINESS} -ggdb
 cc          = gcc -Wall ${BITTINESS}
 
 #-----------------------------------------

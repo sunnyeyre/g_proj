@@ -9,6 +9,7 @@
 #include "Energy_Func.h"
 #include <Eigen/Core>
 #include <Eigen/Dense>
+#include <Eigen/Cholesky>
 
 #ifdef OSX
 #include <GLUT/glut.h>
@@ -28,7 +29,6 @@
 #define PI 3.14159265
 #define g 9.80665 // acceleration due to gravity
 #define l 2 //length of pendulum
-#define NUM 10 //number of Lagrangian nodes in between the 2 rigid nodes
 
 using namespace Eigen;
 using namespace std;
@@ -60,6 +60,12 @@ float radius = 0.05;
 float win_x, win_y, win_z;
 float dt = 1.0/30.0;
 int main_window;
+extern int NUM; //number of Lagrangian nodes in between the 2 rigid nodes
+
+
+int iter = 0;
+
+
 /***********************************************************************/
 
 extern L1node* pendulum_update(L1node * old_node);
@@ -74,6 +80,11 @@ void advanceT(int value) { //jump to the next state every 5 ms
 
 State * takeastep(State * previous_state) { // calculates the next state in the simulation
                                             // this is where the node::update funcs are called    
+ State * state = new State;
+ state->e1 = dynamic_cast<E3node *> (previous_state->e1)->update();
+ state->root = dynamic_cast<E3node *> (state->e1)->rootNode;
+ state->next = NULL;
+ return state;
 
 //    State * state = new State;
 //    L3node * ptr = present_state->root;
@@ -132,27 +143,25 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
 //    state->next = NULL;
 //    return state;
 
-    return NULL;
 }
 
 void buildFrames(){ //builds frames into a cyclic finite state machine
 
-    E1node * prevNode = dynamic_cast<E1node*> (present_state->root->right);
-    
-    if(initial_state->next != NULL && abs((float)present_state->root->right->x->d - prevNode->x->d) < 0.01 && abs((float) present_state->root->right->x_dot->d - prevNode->x_dot->d) < 0.01) {
-        
+    State * prevState = NULL;
+//    if(prevState != NULL && abs(present_state->e1->material_coordinate - prevState->e1->material_coordinate) < 0.001 ) {
+      if(iter > 5) {
         present_state->next = initial_state;
        
         glutTimerFunc(5 , advanceT, 0);
         return;
     }
     else {
-    
+      iter++;
+        prevState = present_state;
         present_state->next = takeastep(present_state);
         
         assert(present_state->next != NULL); //in case of an error, make program fail
        
-        prevNode = dynamic_cast<E1node*> (present_state->root->right);
         present_state = present_state->next;
         
         buildFrames();
@@ -209,38 +218,48 @@ State * state_initialize() { //for now, hard coding in initial parameters
     Vector3f pos1(2.0, 0.0, 0.0);
     Vector3f pos(0,0,0);
     Vector3f vel(0,0,0);
-    L0node * first_node = new L0node(0.0, pos0); //for now, NULL == RIGID, i.e. do nothing
-    L0node * last_node = new L0node(1.0, pos1);
+    L3node * first_node = new L3node(0.0, pos0, vel); //for now, NULL == RIGID, i.e. do nothing
+    L3node * last_node = new L3node(1.0, pos1, vel);
     L3node * nth_node;
     node * prev_node = first_node;
+    first_node->cons = RIGID;
 
     // automatically generates n nodes betwen the stationary nodes L0 and L1
-    for(int i=1; i<NUM; i++) {
+   for(int i=1; i<NUM; i++) {
         
         pos = Vector3f(s*pos1 + (1.0-s)*pos0);
-        nth_node = new L3node(s, pos, vel, pos);
+        nth_node = new L3node(s, pos, vel);
+        nth_node->cons = NORMAL;
         s += 1.0/NUM;
         nth_node->left = prev_node;
-        nth_node->cons_node = NULL;
+      //  nth_node->cons_node = NULL;
         prev_node->right = nth_node;
         
         prev_node = nth_node;
     }
 
     nth_node->right = last_node;
+ 
+//    first_node->right = last_node;
     last_node->left = nth_node;
+   // last_node->left = first_node;
+    last_node->cons = RIGID;
 
-    /********** adding two E3_nodes ****************/
+    /********** adding an E3_node ****************/
     s = 0.5/NUM;
     pos = Vector3f((s)*pos1 + (1.0-s)*pos0);
-    E3node* interesting_node = new E3node(s, pos, vel, pos);
-    interesting_node->rho = 2.0;
+    E3node* interesting_node = new E3node(s, 0.0, pos, vel, first_node);
+ //   interesting_node->pos = VectorXf::Zero(8);
+//    interesting_node->pos << pos.x(), pos.y(), pos.z(), s;
+   // interesting_node->veocity = VectorXf::Zero(8);
+   // interesting_node->force = VectorXf::Zero(8);
+    interesting_node->rho = 10.0;
+    interesting_node->rootNode = first_node;
     /********************************************/
     
     state->root = first_node;
     state->next = NULL;
     state->e1 = interesting_node;
-    
     return state;
 }
 
@@ -249,10 +268,19 @@ void display_lines() { //connects all the lines using all nodes
     glBegin(GL_LINES);
     
     node* ptr = present_state->root;
+    node* e1 = present_state->e1;
+    node* left_of_e1 = (ptr->linear_search(e1->material_coordinate, ptr))->left;
     glVertex3f(ptr->world_x->operator[](0),ptr->world_x->operator[](1),ptr->world_x->operator[](2));
     
     while(ptr->right->right != NULL) {
-        ptr = ptr->right;
+
+       if(ptr == left_of_e1) {
+         glVertex3f(ptr->world_x->operator[](0),ptr->world_x->operator[](1),ptr->world_x->operator[](2));
+         glVertex3f(ptr->world_x->operator[](0),ptr->world_x->operator[](1),ptr->world_x->operator[](2));
+         glVertex3f(e1->world_x->operator[](0),e1->world_x->operator[](1),e1->world_x->operator[](2));
+         glVertex3f(e1->world_x->operator[](0),e1->world_x->operator[](1),e1->world_x->operator[](2));
+       } 
+         ptr = ptr->right;
         
         glVertex3f(ptr->world_x->operator[](0),ptr->world_x->operator[](1),ptr->world_x->operator[](2));
         glVertex3f(ptr->world_x->operator[](0),ptr->world_x->operator[](1),ptr->world_x->operator[](2));
@@ -266,21 +294,26 @@ void display_lines() { //connects all the lines using all nodes
 void display_nodes() { //display all massless nodes as spheres
     
     node * ptr = present_state->root;
+    node* e1 = present_state->e1;
+    node* left_of_e1 = (ptr->linear_search(e1->material_coordinate, ptr))->left;
 
     glTranslatef(ptr->world_x->operator[](0), ptr->world_x->operator[](1), ptr->world_x->operator[](2));
     glutSolidSphere(radius, 20, 20);
     while(ptr->right->right != NULL) {
 
-         ptr = ptr->right;
-         if(present_state->e1->material_coordinate >= ptr->left->material_coordinate && present_state->e1->material_coordinate <=  ptr->material_coordinate) {
-            glTranslatef(present_state->e1->world_x->operator[](0)-ptr->left->world_x->operator[](0), present_state->e1->world_x->operator[](1)-ptr->left->world_x->operator[](1), present_state->e1->world_x->operator[](2)-ptr->left->world_x->operator[](2));
+       if(ptr == left_of_e1) {
+         
+         glTranslatef(e1->world_x->operator[](0)-ptr->world_x->operator[](0), e1->world_x->operator[](1)-ptr->world_x->operator[](1), e1->world_x->operator[](2)-ptr->world_x->operator[](2));
 
-            glutSolidSphere(radius * 2, 20, 20); 
-            glTranslatef(ptr->world_x->operator[](0)-present_state->e1->world_x->operator[](0), ptr->world_x->operator[](1)-present_state->e1->world_x->operator[](1), -ptr->world_x->operator[](2)-present_state->e1->world_x->operator[](2));
-            glutSolidSphere(radius, 20, 20);
-            }
-         else {
+         glutSolidSphere(radius * 2, 20, 20); 
+         ptr = ptr->right;
+
+         glTranslatef(ptr->world_x->operator[](0)-e1->world_x->operator[](0), ptr->world_x->operator[](1)-e1->world_x->operator[](1), -ptr->world_x->operator[](2)-e1->world_x->operator[](2));
+         glutSolidSphere(radius, 20, 20);
+       } 
+      else {
         
+            ptr = ptr->right;
             glTranslatef(ptr->world_x->operator[](0)-ptr->left->world_x->operator[](0), ptr->world_x->operator[](1)-ptr->left->world_x->operator[](1), ptr->world_x->operator[](2)-ptr->left->world_x->operator[](2));
             glutSolidSphere(radius, 20, 20);
          } 
@@ -303,7 +336,11 @@ void initScene(){ //standard OpenGL function to start scene, calls state_initial
     /****************initializes the first frame and calls buildFrames to calculate all Frames **/
     initial_state = state_initialize();
     present_state = initial_state;
-        //   buildFrames();
+
+    Vector4f q0(-2.0,0,0,0);
+    Vector4f q1(-1.6,0,0,0.1);
+
+    buildFrames();
     /*****************************************************************************************/
     
 	glPushMatrix();    
@@ -372,6 +409,7 @@ void myDisplay() { //std OpenGL display func, calls display() method of all node
 
 	glPushMatrix();   
     /***************** these functions make this code input-independent **********************/
+    present_state = present_state->next;
     display_lines();
     display_nodes();
     /*****************************************************************************************/	
@@ -407,19 +445,6 @@ int main(int argc, char *argv[]) {
     
   	glutInit(&argc, argv);
   	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
-    
-   printf("testing inverse of matrix: \n");
-   Matrix4f test;
-   test << 0.5 , 0.0 , 0.0 , 0.0
-    , 0.0,  0.5 , 0.0 , 0.0
-    , 0.0,  0.0 , 0.5 , 0.0
-    , 0.0,  0.0 , 0.0 , 0.5;
-
-   Matrix4f result = test.inverse();
-   printf(" should be identiy: \n");
-   cout << result << endl;
-
-
 
   	viewport.w = 500;
   	viewport.h = 500;

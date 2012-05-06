@@ -37,6 +37,7 @@
 #include "algebra3.h"
 #include <Eigen/Dense>
 #include <Eigen/Core>
+#include <Eigen/SVD>
 
 #define PI 3.14159265
 #define g 9.80665
@@ -52,7 +53,7 @@ class L1node;
 typedef L1node * (*fptr)(L1node *);
 
     // check proper enum syntax
-enum type_of_constraint {CIRCLE, RIGID, FIXED, CYLINDER};
+enum type_of_constraint {CIRCLE, RIGID, FIXED, CYLINDER, NORMAL};
 enum type_of_display {BEAD};
 
 union type_of_parameter {
@@ -87,20 +88,21 @@ public :
     void display(); // for drawing a line from 0 to L
     virtual node * update() =0;
 
-    constraint * cons_node;
+        //    constraint * cons_node;
+    enum type_of_constraint cons;
     double material_coordinate; // this is s, fixed for L nodes and variable to E nodes
-    double rho; // density of segment
+                                //    double rho; // density of segment
     Vector3f * world_x;
-    Vector4f * world_x_dot;
+    Vector3f * world_x_dot;
     node * left;
     node * right;
     union type_of_parameter * x;
     union type_of_parameter * x_dot;
 	
-	Vector4f * force; // uses force accumulate to add forces
-    
+    float rho;
     fptr func; // function for force accumulation
     bool isEnode; //for checking if the node is a special Enode
+    node * linear_search(float s, node* rootNode); //finds node to right of material coordinate
 };
 
 class display_node { //only for displaying, no state copies
@@ -153,14 +155,16 @@ public:
 class L3node : public node {
 public:
 
-    L3node(double m, Vector3f& x_tilda, Vector3f& x_tilda_dot, Vector3f& w_x);
+    L3node(double m, Vector3f& w_x, Vector3f& w_x_dot);
     ~L3node();
     
+    Vector3f * force; // uses force accumulate to add forces
+    
     L3node* update();
-    L3node* update(node* left);
-	
-	void left_force_accumulate(Vector4f & force_left);
-    void right_force_accumulate(Vector4f& force_right);
+    L3node* updateLeft(Vector3f& x, Vector3f& xdot, float alpha); //updates and links
+    L3node* updateRight(Vector3f& x, Vector3f& xdot, float alpha);
+	void left_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha);
+    void right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha);
 };
 class E0node : public node {
 public:
@@ -194,16 +198,21 @@ public:
 class E3node : public node {
 public:
 
-    L3node * right_s; // right node of interval that includes s of Enode
-    double alpha; //interpolation parameter
-	double sdot; //derivative of material coordinate
-    
-    E3node(double m, Vector3f & x_tilda, Vector3f & x_tilda_dot, Vector3f & w_x);
+    E3node();
+    E3node(double m, double mdot, Vector3f& w_x, Vector3f& w_x_dot, node* root);
     ~E3node();
+    
+    node * rootNode;
+    
+    float sdot;
+        //    Vector3f pos; //4 element vector  
+        //    Vector3f velocity; // 4 element vector
+    VectorXf force; // 8 element vector
+    float alpha; //interpolation parameter
     
     E3node* update();
     E3node* update(node* left);
-    void force_accumulate();
+    void force_accumulate(Vector4f& q0, Vector4f& q1);
 	
 };
 

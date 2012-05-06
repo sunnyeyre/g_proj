@@ -35,17 +35,22 @@
 #include "gsl/gsl_min.h"
 #include <Eigen/Dense>
 #include <Eigen/Core>
+#include <Eigen/SVD>
+#include <Eigen/Cholesky>
 
 #define PI 3.14159265
 #define g 9.80665
-#define k 0.2 //spring constant and length of string
+#define ks 0.2 //spring constant and length of string
 #define mass 0.2
 #define length 0.1
+#define kd 0.2 // damping constant of spring
 
 using namespace Eigen;
 using namespace std;
 extern float dt;
 
+int NUM = 10; // number of Lagrangian nodes in between 2 rigid nodes
+float l0 = 4.0/NUM; // rest length of spring
 
 circle_constraint::circle_constraint(float a, float b, float c, node* child){
     
@@ -103,7 +108,6 @@ bead * bead::update(Vector3f& x) {
 
 L0node::L0node(double m, Vector3f& w_x) {
 
-    cons_node = NULL;
     material_coordinate = m;
     world_x = new Vector3f(w_x);
     left = NULL;
@@ -114,7 +118,7 @@ L0node::L0node(double m, Vector3f& w_x) {
 
 void node::display() {
     
-    if (cons_node == NULL || cons_node->type == CIRCLE) {
+    if (cons == CIRCLE) {
         
         if(left == NULL)
             glVertex3f(world_x->operator[](0), world_x->operator[](1), world_x->operator[](2));
@@ -147,7 +151,6 @@ L0node* L0node::update() {
 
 L1node::L1node(double m, double x_tilda, double x_tilda_dot, Vector3f& w_x) {
     
-    cons_node = NULL;
     material_coordinate = m;
     left = NULL;
     right = NULL;
@@ -165,8 +168,6 @@ L1node::~L1node() {
     delete x_dot;
     delete world_x;
     
-    if(cons_node != NULL)
-        delete cons_node;
 }
 /*
 L1node* pendulum_update(L1node * old_node) {
@@ -181,39 +182,21 @@ L1node* pendulum_update(L1node * old_node) {
     return new_node;
 }
 */
-node * linear_search(float s, node * old_right) {
+node * node::linear_search(float s, node* rootNode) {
 // given an s and its old rightmost node, find interval [s0, s1] and return Lnode with s0
    
-   if( s <= old_right->material_coordinate) {
-      if( s >= old_right->left->material_coordinate)
-         return old_right->left;
-      
-      node * ptr = old_right->left;
-      while (ptr->left != NULL) {
-         if(ptr->isEnode) 
-            ptr = ptr->left;
-         else {
+    int i = floor(s * NUM);
+    int j = ceil(s * NUM);
+    if(abs((float) i - s*NUM) < 0.0001) {
+        j = i+1;
+    }
+    
+    node * iterator = rootNode;
+    while(abs(iterator->material_coordinate - (float)j/(float)NUM) > 0.0001)
+        iterator = iterator->right;
+    
+    return iterator;
 
-            if( s >= ptr->left->material_coordinate)
-               return ptr->left;
-            ptr = ptr->left;
-         }
-      }
-   }
-
-   else {
-      node * ptr = old_right->right;
-      while (ptr != NULL) {
-         if(ptr->isEnode)
-            ptr = ptr->right;
-         else {
-
-            if( s <= ptr->material_coordinate)
-               return ptr->left;
-            ptr = ptr->right;
-         }
-      }
-   }
 }
 
 L1node* L1node::update() { //make updates to constrained variables
@@ -234,7 +217,6 @@ L1node* L1node::update() { //make updates to constrained variables
 
 L2node::L2node(double m, Vector2f& x_tilda, Vector2f& x_tilda_dot, Vector3f& w_x) {
     
-    cons_node = NULL;
     material_coordinate = m;
     left = NULL;
     right = NULL;
@@ -253,9 +235,6 @@ L2node::~L2node() {
     delete x;
     delete world_x;
     
-    if ( cons_node != NULL)
-        delete cons_node;
-
 }
 
 L2node * L2node::update() {
@@ -263,17 +242,18 @@ L2node * L2node::update() {
     return this;
 }
 
-L3node::L3node(double m, Vector3f& x_tilda, Vector3f& x_tilda_dot, Vector3f& w_x) {
-    cons_node = NULL;
+L3node::L3node(double m, Vector3f& w_x, Vector3f& w_x_dot) {
     material_coordinate = m;
     left = NULL;
     right = NULL;
-    x = new union type_of_parameter;
-    x->v3 = new Vector3f(x_tilda[0], x_tilda[1], x_tilda[2]);
-    x_dot = new union type_of_parameter;
-    x_dot->v3 = new Vector3f(x_tilda_dot[0], x_tilda_dot[1], x_tilda_dot[2]);
+//    x = new union type_of_parameter;
+//    x->v3 = new Vector3f(x_tilda[0], x_tilda[1], x_tilda[2]);
+//    x_dot = new union type_of_parameter;
+//    x_dot->v3 = new Vector3f(x_tilda_dot[0], x_tilda_dot[1], x_tilda_dot[2]);
     world_x = new Vector3f(w_x);
+    world_x_dot = new Vector3f(0.0, 0.0, 0.0);
     isEnode = false;
+    force = new Vector3f(0.0, 0.0, 0.0);
     rho = 1.0;
 
 }
@@ -283,157 +263,179 @@ L3node::~L3node() {
     delete x->v3;
     delete x;
     delete world_x;
-    if ( cons_node != NULL)
-        delete cons_node;
+//    if ( cons_node != NULL)
+//        delete cons_node;
 
 }
 
-void L3node::left_force_accumulate(Vector4f& force_right) {
+void L3node::left_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha) { // spring
+    	
+    float restLength = l0 * alpha;
     
-        //TODO : check if this is according to the spring equation in Lec23's spring system and gravity
-	
-	if(left != NULL) {
-        Vector3f temp(*(left->world_x) - *world_x);
-        Vector4f x_left(temp[0], temp[1], temp[2], left->material_coordinate - material_coordinate);
-        x_left.normalize();
-			
-        Vector4f force_left = x_left * k * sqrt( (*world_x - *(left->world_x)).dot(*world_x - *(left->world_x)) - length*length);
-        Vector4f result = force_left - force_right;
-	 
-		*(this->force) = result;
-		
-		left_force_accumulate(force_left);
-	}
+    Vector3f deltaXDot = *(world_x_dot) - xdot;
+    Vector3f deltaX = *(world_x) - x;
+    float absDeltaX = sqrt(deltaX.dot(deltaX));
+    float constant = -ks * (restLength - absDeltaX) - kd * deltaXDot.dot(deltaX)/absDeltaX;
+    *force += constant * deltaX / absDeltaX;
+    
+        //     cout << "force" << *force << endl;
 }
 
-void L3node::right_force_accumulate(Vector4f& force_left) {
+void L3node::right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha) {
 
-	if(right != NULL) {
-        Vector3f temp(*(right->world_x) - *world_x);
+    float restLength = l0 * alpha;
+    
+    Vector3f deltaXDot = xdot - *(left->world_x_dot);
+    Vector3f deltaX = x - *(left->world_x);
+    float absDeltaX = sqrt(deltaX.dot(deltaX));
+    float constant = -ks * (restLength - absDeltaX) - kd * deltaXDot.dot(deltaX)/absDeltaX;
+    *force += constant * deltaX / absDeltaX;
+    
+        //   cout << "force" << *force << endl;
 
-		Vector4f x_right(temp[0], temp[1], temp[2], right->material_coordinate - material_coordinate);
-		x_right.normalize();
-	 
-		Vector4f force_right = x_right * k * sqrt( (*world_x - *(right->world_x)).dot(*world_x - *(right->world_x)) - length*length);
-		
-        *(this->force) = force_right - force_left;
-		
-		right_force_accumulate(force_right);
-	}	
 }
 
-void E3node::force_accumulate() {
+void E3node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, resets force every time
 	
-	node * s1_node = linear_search(material_coordinate, right_s);
-	float alpha = (s1_node->left->material_coordinate - material_coordinate)
-	/(s1_node->left->material_coordinate - s1_node->material_coordinate);
-	
-	// s can also have an acceleration and force, even though its just a mesh
-    Vector3f tmp_left(*(s1_node->left->world_x) - *world_x);
-	Vector4f x_left(tmp_left[0], tmp_left[1], tmp_left[2],s1_node->left->material_coordinate - material_coordinate);
-	x_left.normalize();
-	
-	Vector4f force_left  = x_left * (1-alpha) * k * sqrt( (*world_x - *(s1_node->left->world_x)).dot(*world_x - *(s1_node->left->world_x)) - length*length*(1-alpha)*(1-alpha));
-	
-    Vector3f tmp_right(*(s1_node->world_x) - *world_x);
-    Vector4f x_right(tmp_right[0], tmp_right[1], tmp_right[2], s1_node->material_coordinate - material_coordinate);
-	 x_right.normalize();
-	 
-	 Vector4f force_right = x_right * alpha * k * sqrt( (*world_x - *(s1_node->world_x)).dot(*world_x - *(s1_node->world_x)) - length*length*alpha*alpha);
-	 
-//	 Vector4f gravity = (-1.0) * x_left * mass * g * abs((-1.0 * x_left).dot(Vector4f(0,-1.0,0))) - x_right * mass * g *
-//	 abs((-1.0 *x_right).dot(Vector4f(0,-1,0,0))); ***** TODO : what is this supposed to do?
-    Vector4f gravity = x_left - x_right;
-	 
-	 Vector4f result = gravity + force_left + force_right;
-    *(this->force) = result;
-	   
-	 dynamic_cast<L3node *>(s1_node->left)->left_force_accumulate(force_left);
-	 dynamic_cast<L3node *>(s1_node)->right_force_accumulate(force_right);
+    Vector3f gravity = Vector3f(0, g, 0);
+    float constant = rho / 2.0;
+//    float deltas = s1_node->material_coordinate - s0_node->material_coordinate;
+//    Vector3f x0_plus_x1 = Vector3f(*(s1_node->world_x) + *(s0_node->world_x));
+    float deltas = q1[3] - q0[3];
+    Vector4f sumq = q1 + q0;
+    Vector3f x0_plus_x1 = Vector3f(sumq[0], sumq[1], sumq[2]);
+    
+    float g_dot_sum = x0_plus_x1.dot(gravity);    
+    
+    force << gravity.x()*deltas, gravity.y()*deltas, gravity.z()*deltas, gravity.x()*deltas, gravity.y()*deltas, gravity.z()*deltas, g_dot_sum * (-1.0), g_dot_sum;
+//    force << g* deltas, g * deltas, 
+//            -g_dot_sum, g_dot_sum;
+    force *= -constant;
 }
 
 E3node* E3node::update() {
-    return NULL;
-}
 
-E3node* E3node::update(node * left) {
-        // 1 find left and right Lagrangian nodes using material_coordinate
-        // 2 call force_accumulate, plug in correct force equation
-        // 3 solve for qdot for both left and right q, then use alpha to update E3node
-        // 4 call Lagrangian nodes' update
-    this->force_accumulate();
+	node * s1_node = linear_search(material_coordinate, rootNode);
+    node * s0_node = s1_node->left;
     
- //time_integrate step
- 
- // input M matrix
-	MatrixXf M(8,8);
-	float deltas = left->right->material_coordinate - left->material_coordinate;
-	Vector3f deltax = *(left->right->world_x) - *(left->world_x);
+    Vector4f q0(s0_node->world_x->x(), s0_node->world_x->y(), s0_node->world_x->z(), s0_node->material_coordinate);
+    Vector4f q1(s1_node->world_x->x(), s1_node->world_x->y(), s1_node->world_x->z(), s1_node->material_coordinate);
+    
+    force_accumulate(q0, q1);
+
+        // input M matrix
+	MatrixXf M(8,4);
+//	float deltas = right->material_coordinate - left->material_coordinate;
+//	Vector3f deltax = *(right->world_x) - *(left->world_x);
+    Vector4f deltaq = q1 - q0;
+    float deltas = q1[3] - q0[3];
+    Vector3f deltax = Vector3f(deltaq[0], deltaq[1], deltaq[2]);
 	float mss = deltax.dot(deltax) / deltas;
 	
 	M << 2 * deltas, deltas, -2 * deltax[0], -2*deltax[1], -2*deltax[2], -deltax[0], -deltax[1], -deltax[2],  
-		deltas, 2*deltas, -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2],
-		-2*deltax[0], -2*deltax[1], -2*deltax[2], -deltax[0], -deltax[1], -deltax[2], 2*mss, mss,
-		-deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2], mss, 2*mss;
-		
-// input right hand matrix, M*q0 + dt*force
-	Vector4f f, qdot0, rhs;
-	qdot0 << world_x_dot[0], world_x_dot[1], world_x_dot[2], sdot;
-	f = *force;
-	
-	rhs = M * qdot0 + dt * f;
-	VectorXf rhs_full(8);
-	rhs_full << rhs(0), rhs(1), rhs(2), rhs(3), 0, 0, 0, 0;
-	
-	VectorXf qdot = M.inverse() * rhs_full;
+    deltas, 2*deltas, -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2],
+    -2*deltax[0], -2*deltax[1], -2*deltax[2], -deltax[0], -deltax[1], -deltax[2], 2*mss, mss,
+    -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2], mss, 2*mss;
+    
+    M /= rho/6.0;
 
-	E3node * new_node = new E3node(*this);
-	*(new_node->world_x_dot) = qdot;
-	
-	Vector3f myqdot(qdot(0), qdot(1), qdot(2));
-	*(new_node->world_x) = *world_x + dt*myqdot;
-	new_node->material_coordinate = material_coordinate + dt*qdot(3);
-	
-    return new_node;
+        // input right hand matrix, M*q0 + dt*force
+
+    float alpha = (material_coordinate - q0[3])/(q1[3]-q0[3]);
+    Vector3f pos = (1.0-alpha)* *(s0_node->world_x) + alpha * *(s1_node->world_x);
+    Vector3f velocity = (1.0-alpha) * *(s0_node->world_x_dot) + alpha * *(s1_node->world_x_dot);
+    Vector4f q = Vector4f(pos[0], pos[1], pos[2], material_coordinate);
+    Vector4f qdot = Vector4f(velocity[0], velocity[1], velocity[2], sdot);
+    
+    VectorXf rhs = M * qdot + dt * force;
+    
+        // inverting the M matrix using JacobiSVD
+    JacobiSVD<MatrixXf> svd(M, ComputeThinU | ComputeThinV);
+        // save the result in qDotNew
+    Vector4f qDotNew = svd.solve(rhs);
+    
+    cout << "qDotNew : " << qDotNew << endl;
+    
+    Vector4f qNew = q + dt * qDotNew;
+    cout << "qNew : " << qNew << endl;
+    Vector3f xNew = Vector3f(qNew[0], qNew[1], qNew[2]);
+    Vector3f xDotNew = Vector3f(qDotNew[0], qDotNew[1], qDotNew[2]);
+
+        // make a new E3node for the new state with the udpated information
+    
+    E3node * newNode = new E3node(qNew[3], qDotNew[3], xNew, xDotNew, rootNode);
+//	newNode->velocity = M.inverse() * rhs; //qdot update
+//    newNode->pos = pos + dt * velocity; //position update
+
+//    Vector3f x0dot = Vector3f(velocity[0], velocity[1], velocity[2]);
+//    Vector3f x1dot = Vector3f(velocity[3], velocity[4], velocity[5]);
+//    Vector3f x0 = Vector3f(pos[0], pos[1], pos[2]);
+//    Vector3f x1 = Vector3f(pos[3], pos[4], pos[5]);
+//        //post - stasbilization, TODO
+//    *(newNode->world_x) = (1.0-alpha) * x0 + alpha*x1;
+    
+    L3node* leftPart = dynamic_cast<L3node *> (s0_node)->updateLeft(xNew, xDotNew, alpha);
+    L3node* rightPart = dynamic_cast<L3node *> (s1_node)->updateRight(xNew, xDotNew, 1.0-alpha);
+    leftPart->right = rightPart;
+    rightPart->left = leftPart;
+    node* root = leftPart;
+    while(root->left != NULL)
+        root =  root->left;
+    newNode->rootNode = root;
+    
+    return newNode;
+}
+
+L3node* L3node::updateLeft(Vector3f& x, Vector3f& xdot, float alpha) {
+    
+    if(cons != RIGID) {
+        left_force_accumulate(x,xdot, alpha);
+        
+        Vector3f l = *world_x - x;
+        Vector3f acceleration = *force/ (rho * sqrt(l.dot(l)));
+        
+        Vector3f newXDot = acceleration * dt + *world_x_dot;
+        Vector3f newX = newXDot * dt + *world_x;
+        L3node * newNode = new L3node(material_coordinate, newX, newXDot);
+        newNode->left = dynamic_cast<L3node *>(left)->updateLeft(newX, newXDot, 1.0);
+        newNode->left->right = newNode;
+        newNode->cons = NORMAL;
+        return newNode;
+    }
+    else {
+        L3node * newNode = new L3node(material_coordinate, *world_x, *world_x_dot);
+        newNode->left = NULL;
+        newNode->cons = RIGID;
+        return newNode;
+    }
+}
+
+L3node* L3node::updateRight(Vector3f& x, Vector3f& xdot, float alpha) {
+    
+    if(cons != RIGID) {
+        right_force_accumulate(x,xdot, alpha);
+
+        Vector3f l = *world_x - x;
+        Vector3f acceleration = *force/ (rho * sqrt(l.dot(l)));
+  
+        Vector3f newXDot = acceleration * dt + *world_x_dot;
+        Vector3f newX = newXDot * dt + *world_x;
+        L3node * newNode = new L3node(material_coordinate, newX, newXDot);
+        newNode->right = dynamic_cast<L3node *>(right)->updateRight(newX, newXDot, 1.0);
+        newNode->right->left = newNode;
+        newNode->cons = NORMAL;
+        return newNode;
+    }
+    else {
+        L3node * newNode = new L3node(material_coordinate, *(world_x), *(world_x_dot));
+        newNode->right = NULL;
+        newNode->cons = RIGID;
+        return newNode;
+    }
 }
 
 L3node* L3node::update() {
     return NULL;
-}
-
-L3node* L3node::update(node * left) {
-  
- //time_integrate step
- 
- // input M matrix
-	MatrixXf M(8,8);
-	float deltas = left->right->material_coordinate - left->material_coordinate;
-	Vector3f deltax = *(left->right->world_x) - *(left->world_x);
-	float mss = deltax.dot(deltax) / deltas;
-	
-	M << 2 * deltas, deltas, -2 * deltax[0], -2*deltax[1], -2*deltax[2], -deltax[0], -deltax[1], -deltax[2],  
-		deltas, 2*deltas, -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2],
-		-2*deltax[0], -2*deltax[1], -2*deltax[2], -deltax[0], -deltax[1], -deltax[2], 2*mss, mss,
-		-deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2], mss, 2*mss;
-		
-// input right hand matrix, M*q0 + dt*force
-	Vector4f force, qdot0, rhs;
-	qdot0 << world_x_dot[0], world_x_dot[1], world_x_dot[2], 0;
-	force << force[0], force[1], force[2], force[3];
-	
-	rhs = M * qdot0 + dt * force;
-	VectorXf rhs_full(8);
-	rhs_full << rhs(0), rhs(1), rhs(2), rhs(3), 0, 0, 0, 0;
-	
-	VectorXf qdot = M.inverse() * rhs_full;
-
-	L3node * new_node = new L3node(*this);
-	*(new_node->world_x_dot) = qdot;
-	
-	Vector3f myqdot = Vector3f(qdot(0), qdot(1), qdot(2));
-	*(new_node->world_x) = *world_x + dt*myqdot;
-	
-    return new_node;
 }
 
 E0node::E0node(double m, Vector3f& w_x) {
@@ -446,9 +448,9 @@ E0node::E0node(double m, Vector3f& w_x) {
 E0node::~E0node() {
     
     delete world_x;
-
-    if ( cons_node != NULL)
-        delete cons_node;
+//
+//    if ( cons_node != NULL)
+//        delete cons_node;
     
 }
 
@@ -468,8 +470,8 @@ E1node::~E1node() {
     
     delete world_x;
 
-    if ( cons_node != NULL)
-        delete cons_node;
+//    if ( cons_node != NULL)
+//        delete cons_node;
     
 }
 
@@ -494,8 +496,8 @@ E2node::~E2node() {
     
     delete world_x;
 
-    if ( cons_node != NULL)
-        delete cons_node;
+//    if ( cons_node != NULL)
+//        delete cons_node;
     
 }
 
@@ -504,10 +506,41 @@ E2node * E2node::update() {
     return this;
 }
 
-E3node::E3node(double m, Vector3f& x_tilda, Vector3f& x_tilda_dot, Vector3f& w_x) {
+E3node::E3node() {
+    
+    world_x = new Vector3f();
+    world_x_dot = new Vector3f(0.0,0.0,0.0);
+    isEnode = true;
+//    pos = Vector4f(0.0,0,0,0);
+//    velocity = Vector4f(0,0,0,0);
+    force = VectorXf::Zero(8);
+    
+    
+}
+
+E3node::E3node(double m, double mdot, Vector3f& w_x, Vector3f& w_x_dot, node * root) {
+
     world_x = new Vector3f(w_x);
+    world_x_dot = new Vector3f(w_x_dot);
     isEnode = true;
     material_coordinate = m;
+    sdot = mdot;
+    
+//    node * right_of_this = this->linear_search(material_coordinate, root);
+//    node * left_of_this = right_of_this->left;
+    
+//    pos = Vector4f(0,0,0,0);
+//    pos << left_of_this->world_x->x(), left_of_this->world_x->y(), left_of_this->world_x->z(),
+//            right_of_this->world_x->x(), right_of_this->world_x->y(), right_of_this->world_x->z(),
+//    left_of_this->material_coordinate, right_of_this->material_coordinate;
+    
+    
+//    velocity = Vector4f(0,0,0,0);
+//    velocity << left_of_this->world_x_dot->x(), left_of_this->world_x_dot->y(), left_of_this->world_x_dot->z(),
+//            right_of_this->world_x_dot->x(), right_of_this->world_x_dot->y(), right_of_this->world_x_dot->z(),
+//    0, 0;
+    
+    force = VectorXf::Zero(8);
     
 }
 
@@ -515,7 +548,7 @@ E3node::~E3node() {
     
     delete world_x;
     
-    if ( cons_node != NULL)
-        delete cons_node;
+//    if ( cons_node != NULL)
+//        delete cons_node;
     
 }
