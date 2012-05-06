@@ -40,7 +40,7 @@
 
 #define PI 3.14159265
 #define g 9.80665
-#define ks 0.2 //spring constant and length of string
+#define ks 20 //spring constant and length of string
 #define mass 0.2
 #define length 0.1
 #define kd 0.2 // damping constant of spring
