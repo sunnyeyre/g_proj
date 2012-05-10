@@ -160,11 +160,14 @@ public:
     
     Vector3f * force; // uses force accumulate to add forces
     
+    node * rootNode;
+
     L3node* update();
-    L3node* updateLeft(Vector3f& x, Vector3f& xdot, float alpha); //updates and links
-    L3node* updateRight(Vector3f& x, Vector3f& xdot, float alpha);
-	void left_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha);
-    void right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha);
+    void force_accumulate();
+    L3node* updateLeft(Vector3f& x, Vector3f& xdot, float alpha, const Vector3f& f); //updates and links
+    L3node* updateRight(Vector3f& x, Vector3f& xdot, float alpha,const Vector3f& f);
+	void left_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, const Vector3f& f);
+    void right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, const Vector3f& f);
 };
 class E0node : public node {
 public:
