@@ -40,10 +40,10 @@
 
 #define PI 3.14159265
 #define g 9.80665
-#define ks 2.0 //spring constant and length of string
+#define ks 8.0 //spring constant and length of string
 #define mass 0.2
 #define length 0.1
-#define kd 0.2 // damping constant of spring
+#define kd 2.0 // damping constant of spring
 
 using namespace Eigen;
 using namespace std;

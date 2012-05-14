@@ -255,7 +255,7 @@ State * state_initialize() { //for now, hard coding in initial parameters
 //    interesting_node->pos << pos.x(), pos.y(), pos.z(), s;
    // interesting_node->veocity = VectorXf::Zero(8);
    // interesting_node->force = VectorXf::Zero(8);
-    interesting_node->rho = 100.0;
+    interesting_node->rho = 2.0;
     interesting_node->rootNode = first_node;
     /********************************************/
     
