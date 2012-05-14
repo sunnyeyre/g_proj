@@ -75,7 +75,7 @@ extern E3node* mass_node(E3node * old_node);
 void advanceT(int value) { //jump to the next state every 5 ms
     
     present_state = present_state->next;
-    glutTimerFunc(1, advanceT, 0);
+    glutTimerFunc(10, advanceT, 0);
 }
 
 State * takeastep(State * previous_state) { // calculates the next state in the simulation
@@ -153,7 +153,7 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
       if(iter > 10000) {
         present_state->next = initial_state;
        
-        glutTimerFunc(1 , advanceT, 0);
+        glutTimerFunc(10, advanceT, 0);
         return;
     }
     else {
@@ -255,7 +255,7 @@ State * state_initialize() { //for now, hard coding in initial parameters
 //    interesting_node->pos << pos.x(), pos.y(), pos.z(), s;
    // interesting_node->veocity = VectorXf::Zero(8);
    // interesting_node->force = VectorXf::Zero(8);
-    interesting_node->rho = 10.0;
+    interesting_node->rho = 100.0;
     interesting_node->rootNode = first_node;
     /********************************************/
     

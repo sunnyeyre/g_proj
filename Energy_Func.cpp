@@ -51,6 +51,7 @@ extern float dt;
 
 int NUM = 10; // number of Lagrangian nodes in between 2 rigid nodes
 float l0 = 4.0/NUM; // rest length of spring
+float maxL = 20 * l0;
 
 circle_constraint::circle_constraint(float a, float b, float c, node* child){
     
@@ -269,17 +270,22 @@ L3node::~L3node() {
 }
 
 void L3node::left_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, const Vector3f& f) { // spring
-    	
+    //testing: need to put in the right scaling factors, but this equation is for vertical dimension only
+    //
     Vector3f dxLeft = x - *world_x;
     dxLeft.normalize();
-    *force = dxLeft.dot(f) * f/2;
-    float restLength = l0 * alpha;
+    *force = dxLeft.dot(f) * f * (1.0-alpha);
+    float restLengthRight = l0 * alpha;
+    float restLengthLeft = l0;
     
-    Vector3f deltaXDot = *(world_x_dot) - xdot;
-    Vector3f deltaX = *(world_x) - x;
-    float absDeltaX = sqrt(deltaX.dot(deltaX));
-    float constant = -ks * (restLength - absDeltaX) - kd * deltaXDot.dot(deltaX)/absDeltaX;
- //   *force += constant * deltaX / absDeltaX;
+    Vector3f deltaXDotRight = *(world_x_dot) - xdot;
+    Vector3f deltaXDotLeft = *(world_x_dot) - *(left->world_x_dot);
+    Vector3f deltaXRight = *(world_x) - x;
+    Vector3f deltaXLeft = *world_x -*(left->world_x);
+    float absDeltaXRight = sqrt(deltaXRight.dot(deltaXRight));
+    float absDeltaXLeft = sqrt(deltaXLeft.dot(deltaXLeft));
+    Vector3f constant = -(ks * (absDeltaXLeft - restLengthLeft) + kd * deltaXDotLeft.dot(deltaXLeft)/absDeltaXLeft)*deltaXLeft/absDeltaXLeft - (ks * (absDeltaXRight - restLengthRight) + kd * deltaXDotRight.dot(deltaXRight)/absDeltaXRight)*deltaXRight/absDeltaXRight;
+   *force += constant;
     
         //     cout << "force" << *force << endl;
 }
@@ -288,14 +294,18 @@ void L3node::right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, co
 
     Vector3f dxRight = x - *world_x;
     dxRight.normalize();
-    *force = dxRight.dot(f) * f/2;
-    float restLength = l0 * alpha;
+    *force = dxRight.dot(f) * f * (1.0-alpha);
+    float restLengthLeft = l0 * alpha;
+    float restLengthRight = l0;
     
-    Vector3f deltaXDot = xdot - *(left->world_x_dot);
-    Vector3f deltaX = x - *(left->world_x);
-    float absDeltaX = sqrt(deltaX.dot(deltaX));
-    float constant = -ks * (restLength - absDeltaX) - kd * deltaXDot.dot(deltaX)/absDeltaX;
-  //  *force += constant * deltaX / absDeltaX;
+    Vector3f deltaXDotLeft = *(world_x_dot) - xdot;
+    Vector3f deltaXDotRight = *(world_x_dot) - *(right->world_x_dot);
+    Vector3f deltaXLeft = *world_x - x;
+    Vector3f deltaXRight = *world_x - *(right->world_x);
+    float absDeltaXLeft = sqrt(deltaXLeft.dot(deltaXLeft));
+    float absDeltaXRight = sqrt(deltaXRight.dot(deltaXRight));
+    Vector3f constant = -(ks * (absDeltaXLeft - restLengthLeft) + kd * deltaXDotLeft.dot(deltaXLeft)/absDeltaXLeft)*deltaXLeft/absDeltaXLeft - (ks * (absDeltaXRight - restLengthRight) + kd * deltaXDotRight.dot(deltaXRight)/absDeltaXRight)*deltaXRight/absDeltaXRight;
+   *force += constant;
     
         //   cout << "force" << *force << endl;
 
@@ -330,7 +340,10 @@ L3node* L3node::update() {
 	node * s1_node = linear_search(material_coordinate, rootNode);
     node * s0_node = s1_node->left;
 
+    Vector3f deltax = *(s0_node->world_x) - *world_x;
     force_accumulate();
+    if(abs(deltax.dot(deltax)) > maxL)
+       *force = Vector3f(0.0,0.0,0.0);
 
     Vector3f xDotNew = *force * dt/ rho + *world_x_dot;
     Vector3f xNew = xDotNew*dt + *world_x;
@@ -428,12 +441,17 @@ L3node* L3node::updateLeft(Vector3f& x, Vector3f& xdot, float alpha, const Vecto
         left_force_accumulate(x,xdot, alpha, f);
         
         Vector3f l = *world_x - x;
-        Vector3f acceleration = *force/ (rho * sqrt(l.dot(l)));
+        Vector3f acceleration;
+        if(abs(l.dot(l)) >= maxL)
+           acceleration = Vector3f(0.0,0.0,0.0);
+        else
+            acceleration = *force/ (rho * sqrt(l.dot(l)));
         
         Vector3f newXDot = acceleration * dt + *world_x_dot;
         Vector3f newX = newXDot * dt + *world_x;
         L3node * newNode = new L3node(material_coordinate, newX, newXDot);
-        newNode->left = dynamic_cast<L3node *>(left)->updateLeft(newX, newXDot, 1.0, *force);
+        //newNode->left = dynamic_cast<L3node *>(left)->updateLeft(newX, newXDot, 1.0, *force);
+        newNode->left = dynamic_cast<L3node *>(left)->updateLeft(newX, newXDot, 1.0, f);
         newNode->left->right = newNode;
         newNode->cons = NORMAL;
         return newNode;
@@ -452,12 +470,17 @@ L3node* L3node::updateRight(Vector3f& x, Vector3f& xdot, float alpha,const Vecto
         right_force_accumulate(x,xdot, alpha, f);
 
         Vector3f l = *world_x - x;
-        Vector3f acceleration = *force/ (rho * sqrt(l.dot(l)));
+        Vector3f acceleration;
+        if(abs(l.dot(l)) >= maxL)
+           acceleration = Vector3f(0.0,0.0,0.0);
+        else
+            acceleration = *force/ (rho * sqrt(l.dot(l)));
   
         Vector3f newXDot = acceleration * dt + *world_x_dot;
         Vector3f newX = newXDot * dt + *world_x;
         L3node * newNode = new L3node(material_coordinate, newX, newXDot);
-        newNode->right = dynamic_cast<L3node *>(right)->updateRight(newX, newXDot, 1.0, *force);
+        //newNode->right = dynamic_cast<L3node *>(right)->updateRight(newX, newXDot, 1.0, *force);
+        newNode->right = dynamic_cast<L3node *>(right)->updateRight(newX, newXDot, 1.0, f);
         newNode->right->left = newNode;
         newNode->cons = NORMAL;
         return newNode;
