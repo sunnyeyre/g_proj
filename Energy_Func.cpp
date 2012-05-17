@@ -255,7 +255,7 @@ L3node::L3node(double m, Vector3f& w_x, Vector3f& w_x_dot) {
     world_x_dot = new Vector3f(0.0, 0.0, 0.0);
     isEnode = false;
     force = new Vector3f(0.0, 0.0, 0.0);
-    rho = 1.0;
+    rho = 0.1;
 
 }
 
@@ -275,6 +275,7 @@ void L3node::left_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, con
     Vector3f dxLeft = x - *world_x;
     dxLeft.normalize();
     *force = dxLeft.dot(f) * f * (1.0-alpha);
+    *force += rho * Vector3f(0,-g,0) * l0;
     float restLengthRight = l0 * alpha;
     float restLengthLeft = l0;
     
@@ -295,6 +296,7 @@ void L3node::right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, co
     Vector3f dxRight = x - *world_x;
     dxRight.normalize();
     *force = dxRight.dot(f) * f * (1.0-alpha);
+    *force += rho * Vector3f(0,-g,0) * l0;
     float restLengthLeft = l0 * alpha;
     float restLengthRight = l0;
     
@@ -311,6 +313,23 @@ void L3node::right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, co
 
 }
 
+void E0node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, resets force every time
+	
+    Vector3f gravity = Vector3f(0, g, 0);
+    float constant = rho / 2.0;
+//    float deltas = s1_node->material_coordinate - s0_node->material_coordinate;
+//    Vector3f x0_plus_x1 = Vector3f(*(s1_node->world_x) + *(s0_node->world_x));
+    float deltas = q1[3] - q0[3];
+    Vector4f sumq = q1 + q0;
+    Vector3f x0_plus_x1 = Vector3f(sumq[0], sumq[1], sumq[2]);
+    
+    float g_dot_sum = x0_plus_x1.dot(gravity);    
+    
+    force << gravity.x()*deltas, gravity.y()*deltas, gravity.z()*deltas, gravity.x()*deltas, gravity.y()*deltas, gravity.z()*deltas, g_dot_sum * (-1.0), g_dot_sum;
+//    force << g* deltas, g * deltas, 
+//            -g_dot_sum, g_dot_sum;
+    force *= -constant;
+}
 void E3node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, resets force every time
 	
     Vector3f gravity = Vector3f(0, g, 0);
@@ -493,11 +512,15 @@ L3node* L3node::updateRight(Vector3f& x, Vector3f& xdot, float alpha,const Vecto
     }
 }
 
-E0node::E0node(double m, Vector3f& w_x) {
-    
+E0node::E0node(double m, double mdot, Vector3f& w_x, Vector3f& w_x_dot, node * root) {
+
     world_x = new Vector3f(w_x);
+    world_x_dot = new Vector3f(w_x_dot);
     isEnode = true;
-    
+    material_coordinate = m;
+    sdot = mdot;
+    force = VectorXf::Zero(8);
+    rootNode = root;
 }
 
 E0node::~E0node() {
@@ -511,7 +534,61 @@ E0node::~E0node() {
 
 E0node* E0node::update() {
     
-    return this;
+	node * s1_node = linear_search(material_coordinate, rootNode);
+    node * s0_node = s1_node->left;
+    
+    Vector4f q0(s0_node->world_x->x(), s0_node->world_x->y(), s0_node->world_x->z(), s0_node->material_coordinate);
+    Vector4f q1(s1_node->world_x->x(), s1_node->world_x->y(), s1_node->world_x->z(), s1_node->material_coordinate);
+    
+    force_accumulate(q0, q1);
+
+        // input M matrix
+	MatrixXf M(8,1);
+    Vector4f deltaq = q1 - q0;
+    float deltas = q1[3] - q0[3];
+    Vector3f deltax = Vector3f(deltaq[0], deltaq[1], deltaq[2]);
+	float mss = deltax.dot(deltax) / deltas;
+	
+	M << -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2], mss, 2*mss;
+    
+    M /= rho/6.0;
+
+        // input right hand matrix, M*q0 + dt*force
+
+    VectorXf rhs = M * sdot + dt * force;
+    
+        // inverting the M matrix using JacobiSVD
+    JacobiSVD<MatrixXf> svd(M, ComputeThinU | ComputeThinV);
+        // save the result in qDotNew
+    VectorXf qDotNew = svd.solve(rhs);
+    
+    cout << "qDotNew : " << qDotNew << endl;
+    
+    float qNew = material_coordinate + dt * qDotNew[0];
+    cout << "qNew : " << qNew << endl;
+
+    s1_node = linear_search(qNew, rootNode);
+    s0_node = s1_node->left;
+
+    float alpha = (qNew - s0_node->material_coordinate)/(s1_node->material_coordinate-s0_node->material_coordinate);
+
+    Vector3f xNew = (1.0-alpha)* *(s0_node->world_x) + alpha * *(s1_node->world_x);
+    Vector3f xDotNew = (1.0-alpha) * *(s0_node->world_x_dot) + alpha * *(s1_node->world_x_dot);
+
+        // make a new E0node for the new state with the udpated information
+    
+    E0node * newNode = new E0node(qNew, qDotNew[0], xNew, xDotNew, rootNode);
+    
+    L3node* leftPart = dynamic_cast<L3node *> (s0_node)->updateLeft(xNew, xDotNew, alpha, force);
+    L3node* rightPart = dynamic_cast<L3node *> (s1_node)->updateRight(xNew, xDotNew, 1.0-alpha,force);
+    leftPart->right = rightPart;
+    rightPart->left = leftPart;
+    node* root = leftPart;
+    while(root->left != NULL)
+        root =  root->left;
+    newNode->rootNode = root;
+    
+    return newNode;
 }
 
 E1node::E1node(double m, double x_tilda, double x_tilda_dot, Vector3f& w_x) {
@@ -570,7 +647,7 @@ E3node::E3node() {
 //    velocity = Vector4f(0,0,0,0);
     force = VectorXf::Zero(8);
     
-    
+   rootNode = NULL; 
 }
 
 E3node::E3node(double m, double mdot, Vector3f& w_x, Vector3f& w_x_dot, node * root) {
@@ -580,6 +657,7 @@ E3node::E3node(double m, double mdot, Vector3f& w_x, Vector3f& w_x_dot, node * r
     isEnode = true;
     material_coordinate = m;
     sdot = mdot;
+    rootNode = root;
     
 //    node * right_of_this = this->linear_search(material_coordinate, root);
 //    node * left_of_this = right_of_this->left;

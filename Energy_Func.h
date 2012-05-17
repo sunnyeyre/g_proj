@@ -171,11 +171,14 @@ public:
 };
 class E0node : public node {
 public:
-    E0node(double m, Vector3f& w_x);
+    E0node(double m, double mdot, Vector3f& w_x, Vector3f& w_x_dot, node * root);
     ~E0node();
     
     E0node* update();
-    
+    void force_accumulate(Vector4f& q0, Vector4f& q1);
+
+    VectorXf force;
+    node * rootNode;
     double sdot;
 };
 class E1node : public node {

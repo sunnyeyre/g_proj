@@ -58,7 +58,7 @@ State* present_state;
 /* some config variables for frames/sec, size of node, init rot angle, etc.*/
 float radius = 0.05;
 float win_x, win_y, win_z;
-float dt = 1.0/30.0;
+float dt = 1.0/80.0;
 int main_window;
 extern int NUM; //number of Lagrangian nodes in between the 2 rigid nodes
 
@@ -75,14 +75,15 @@ extern E3node* mass_node(E3node * old_node);
 void advanceT(int value) { //jump to the next state every 5 ms
     
     present_state = present_state->next;
-    glutTimerFunc(10, advanceT, 0);
+    glutTimerFunc(5, advanceT, 0);
 }
 
 State * takeastep(State * previous_state) { // calculates the next state in the simulation
                                             // this is where the node::update funcs are called    
  State * state = new State;
 // state->e1 = dynamic_cast<E3node *> (previous_state->e1)->update();
- state->e1 = dynamic_cast<L3node *> (previous_state->e1)->update();
+ //state->e1 = dynamic_cast<L3node *> (previous_state->e1)->update();
+ state->e1 = dynamic_cast<E0node *> (previous_state->e1)->update();
  state->root = dynamic_cast<L3node *> (state->e1)->rootNode;
  state->next = NULL;
  return state;
@@ -238,7 +239,6 @@ State * state_initialize() { //for now, hard coding in initial parameters
         
         prev_node = nth_node;
     }
-
     nth_node->right = last_node;
  
 //    first_node->right = last_node;
@@ -249,12 +249,9 @@ State * state_initialize() { //for now, hard coding in initial parameters
     /********** adding an E3_node ****************/
     s = 0.5/NUM;
     pos = Vector3f((s)*pos1 + (1.0-s)*pos0);
-    L3node * interesting_node = new L3node(s, pos, vel);
+//    L3node * interesting_node = new L3node(s, pos, vel);
 //    E3node* interesting_node = new E3node(s, 0.0, pos, vel, first_node);
- //   interesting_node->pos = VectorXf::Zero(8);
-//    interesting_node->pos << pos.x(), pos.y(), pos.z(), s;
-   // interesting_node->veocity = VectorXf::Zero(8);
-   // interesting_node->force = VectorXf::Zero(8);
+    E0node * interesting_node = new E0node(s, 0.0, pos, vel, first_node);
     interesting_node->rho = 2.0;
     interesting_node->rootNode = first_node;
     /********************************************/
