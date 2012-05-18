@@ -155,7 +155,7 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
        if(present_state->e1->material_coordinate > 0.99){
         present_state->next = initial_state;
        
-        glutTimerFunc(10, advanceT, 0);
+        glutTimerFunc(1, advanceT, 0);
         return;
     }
     else {

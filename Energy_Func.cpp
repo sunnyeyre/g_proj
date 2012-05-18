@@ -284,7 +284,7 @@ void L3node::left_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, con
     Vector3f deltaXRight = *(world_x) - x;
     Vector3f deltaXLeft = *world_x -*(left->world_x);
 
-   if(deltaXRight.dot(deltaXRight) < 0.001) { //ball overlaps L3node
+   if(deltaXRight.dot(deltaXRight) < 0.2) { //ball overlaps L3node
       deltaXDotRight = *(world_x_dot) - *(right->world_x_dot);
       deltaXRight = *world_x - *(right->world_x);
       restLengthRight = l0;
@@ -313,7 +313,7 @@ void L3node::right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, co
     Vector3f deltaXLeft = *world_x - x;
     Vector3f deltaXRight = *world_x - *(right->world_x);
 
-   if(deltaXLeft.dot(deltaXLeft) < 0.001) { //ball overlaps L3node
+   if(deltaXLeft.dot(deltaXLeft) < 0.2) { //ball overlaps L3node
       deltaXDotLeft = *(world_x_dot) - *(left->world_x_dot);
       deltaXLeft = *world_x - *(left->world_x);
       restLengthLeft = l0;
