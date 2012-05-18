@@ -75,7 +75,7 @@ extern E3node* mass_node(E3node * old_node);
 void advanceT(int value) { //jump to the next state every 5 ms
     
     present_state = present_state->next;
-    glutTimerFunc(5, advanceT, 0);
+    glutTimerFunc(10, advanceT, 0);
 }
 
 State * takeastep(State * previous_state) { // calculates the next state in the simulation
@@ -151,7 +151,8 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
 
     State * prevState = NULL;
 //    if(prevState != NULL && abs(present_state->e1->material_coordinate - prevState->e1->material_coordinate) < 0.001 ) {
-      if(iter > 100) {
+//      if(iter > 10000) {
+       if(present_state->e1->material_coordinate > 0.99){
         present_state->next = initial_state;
        
         glutTimerFunc(10, advanceT, 0);
