@@ -90,7 +90,7 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
 
    float deltas;
    node * ptr = previous_state->root->right;
-   MatrixXf M = MatrixXf::Zero(3*(NUM-2)+1, 3*(NUM-2)+1);
+   MatrixXf M = MatrixXf::Zero(3*(NUM-2)+1, 3*(NUM-2)+1); //genralized mass matrix for the entire system
    for(int i=0; i<3*(NUM-2); i+=3) {
 
       // diagonal entryies = 2*deltas, off diagonal = deltas
@@ -238,13 +238,17 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
       ptr = ptr->right;
    }
 
+   cout << "sanity check... qOldDot : " << qOldDot << "qOld: " << qOld << "f: " << f << endl;
+
 
    Vector3f x0_and_x1= (1-alpha)* *(right_of_e0->left->world_x) + alpha* *(right_of_e0->world_x);
     f[3*(NUM-2)] = previous_state->e1->rho * x0_and_x1.dot(Vector3f(0,-g,0)); 
 
    VectorXf rhs = M * qOldDot +  dt * f;
+   VectorXf qNewDot;
 
-   VectorXf qNewDot = M.inverse() * rhs;
+   qNewDot = M.lu().solve(rhs);
+
 
    VectorXf qNew = qNewDot * dt + qOld;
 
@@ -270,8 +274,7 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
       newPtr = newPtr->right;
    }
 
-   cout << "qNew : " << qNew[3*(NUM-2)] << endl;
-
+ cout << "qNew : " << qNew << "qDotNew: " << qNewDot << endl;
    right_of_e0 = linear_search(qNew[3*(NUM-2)], newRoot);
    alpha = (qNew[3*(NUM-2)] - right_of_e0->left->material_coordinate) / (right_of_e0->material_coordinate - right_of_e0->left->material_coordinate);
    newX = (1.0-alpha) * *(right_of_e0->left->world_x) + alpha * *(right_of_e0->world_x);
@@ -314,7 +317,7 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
        
         present_state = present_state->next;
         
-        buildFrames();
+ //       buildFrames();
     }
 }
 

@@ -186,6 +186,11 @@ L1node* pendulum_update(L1node * old_node) {
 node * linear_search(float s, node* rootNode) {
 // given an s and its old rightmost node, find interval [s0, s1] and return Lnode with s0
    
+    if(s < 0.0) {
+       printf("material coordinate is negative !\n");
+       assert(s > 0.0);
+    }
+
     int i = floor(s * NUM);
     int j = ceil(s * NUM);
     if(abs((float) i - s*NUM) < 0.0001) {
