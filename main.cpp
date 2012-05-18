@@ -84,7 +84,7 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
 // state->e1 = dynamic_cast<E3node *> (previous_state->e1)->update();
  //state->e1 = dynamic_cast<L3node *> (previous_state->e1)->update();
  state->e1 = dynamic_cast<E0node *> (previous_state->e1)->update();
- state->root = dynamic_cast<L3node *> (state->e1)->rootNode;
+ state->root = dynamic_cast<E0node *> (state->e1)->rootNode;
  state->next = NULL;
  return state;
 
@@ -151,7 +151,7 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
 
     State * prevState = NULL;
 //    if(prevState != NULL && abs(present_state->e1->material_coordinate - prevState->e1->material_coordinate) < 0.001 ) {
-      if(iter > 10000) {
+      if(iter > 100) {
         present_state->next = initial_state;
        
         glutTimerFunc(10, advanceT, 0);
@@ -408,7 +408,7 @@ void myDisplay() { //std OpenGL display func, calls display() method of all node
 
 	glPushMatrix();   
     /***************** these functions make this code input-independent **********************/
-    present_state = present_state->next;
+    //present_state = present_state->next;
     display_lines();
     display_nodes();
     /*****************************************************************************************/	

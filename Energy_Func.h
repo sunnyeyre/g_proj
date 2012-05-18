@@ -177,7 +177,7 @@ public:
     E0node* update();
     void force_accumulate(Vector4f& q0, Vector4f& q1);
 
-    VectorXf force;
+    VectorXf * force;
     node * rootNode;
     double sdot;
 };

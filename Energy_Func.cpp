@@ -315,7 +315,7 @@ void L3node::right_force_accumulate(Vector3f& x, Vector3f& xdot, float alpha, co
 
 void E0node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, resets force every time
 	
-    Vector3f gravity = Vector3f(0, g, 0);
+    Vector3f gravity = Vector3f(0, -g, 0);
     float constant = rho / 2.0;
 //    float deltas = s1_node->material_coordinate - s0_node->material_coordinate;
 //    Vector3f x0_plus_x1 = Vector3f(*(s1_node->world_x) + *(s0_node->world_x));
@@ -325,10 +325,13 @@ void E0node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, rese
     
     float g_dot_sum = x0_plus_x1.dot(gravity);    
     
-    force << gravity.x()*deltas, gravity.y()*deltas, gravity.z()*deltas, gravity.x()*deltas, gravity.y()*deltas, gravity.z()*deltas, g_dot_sum * (-1.0), g_dot_sum;
+    (*force)[0] =  gravity.x()*deltas;
+    (*force)[1] = gravity.y()*deltas;
+     (*force)[2]=   gravity.z()*deltas; (*force)[3]= gravity.x()*deltas; (*force)[4]= gravity.y()*deltas; (*force)[5]= gravity.z()*deltas; (*force)[6]= g_dot_sum * (-1.0); (*force)[7]= g_dot_sum;
 //    force << g* deltas, g * deltas, 
 //            -g_dot_sum, g_dot_sum;
-    force *= -constant;
+  (*force) *= -constant;
+
 }
 void E3node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, resets force every time
 	
@@ -519,13 +522,16 @@ E0node::E0node(double m, double mdot, Vector3f& w_x, Vector3f& w_x_dot, node * r
     isEnode = true;
     material_coordinate = m;
     sdot = mdot;
-    force = VectorXf::Zero(8);
+    force = new VectorXf(8);
+    *force = VectorXf::Zero(8);
     rootNode = root;
 }
 
 E0node::~E0node() {
     
     delete world_x;
+    delete force;
+    delete world_x_dot;
 //
 //    if ( cons_node != NULL)
 //        delete cons_node;
@@ -542,25 +548,29 @@ E0node* E0node::update() {
     
     force_accumulate(q0, q1);
 
-        // input M matrix
-	MatrixXf M(8,1);
+        // input M matrix : add one more column for dummy nodes to pass the eigen svd param limit
+	MatrixXf M(8,2);
     Vector4f deltaq = q1 - q0;
+
     float deltas = q1[3] - q0[3];
     Vector3f deltax = Vector3f(deltaq[0], deltaq[1], deltaq[2]);
 	float mss = deltax.dot(deltax) / deltas;
 	
-	M << -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2], mss, 2*mss;
+	M << -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2], mss, 2*mss,
+      1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0;
     
     M /= rho/6.0;
 
         // input right hand matrix, M*q0 + dt*force
 
-    VectorXf rhs = M * sdot + dt * force;
-    
+    Vector2f SDot(sdot, 1.0);
+
+    VectorXf rhs = M * SDot + dt * *force;
+
         // inverting the M matrix using JacobiSVD
     JacobiSVD<MatrixXf> svd(M, ComputeThinU | ComputeThinV);
         // save the result in qDotNew
-    VectorXf qDotNew = svd.solve(rhs);
+    Vector2f qDotNew = svd.solve(rhs);
     
     cout << "qDotNew : " << qDotNew << endl;
     
@@ -578,9 +588,11 @@ E0node* E0node::update() {
         // make a new E0node for the new state with the udpated information
     
     E0node * newNode = new E0node(qNew, qDotNew[0], xNew, xDotNew, rootNode);
+    newNode->rho = 2.0;
     
-    L3node* leftPart = dynamic_cast<L3node *> (s0_node)->updateLeft(xNew, xDotNew, alpha, force);
-    L3node* rightPart = dynamic_cast<L3node *> (s1_node)->updateRight(xNew, xDotNew, 1.0-alpha,force);
+    Vector3f gravity = Vector3f(0, -g, 0);
+    L3node* leftPart = dynamic_cast<L3node *> (s0_node)->updateLeft(xNew, xDotNew, qNew, gravity);
+    L3node* rightPart = dynamic_cast<L3node *> (s1_node)->updateRight(xNew, xDotNew, 1.0-qNew,gravity);
     leftPart->right = rightPart;
     rightPart->left = leftPart;
     node* root = leftPart;
