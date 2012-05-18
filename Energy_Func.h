@@ -51,6 +51,8 @@ using Eigen::Vector2f;
 class node; //forward declaration
 class L1node;
 typedef L1node * (*fptr)(L1node *);
+    
+node * linear_search(float s, node* rootNode); //finds node to right of material coordinate
 
     // check proper enum syntax
 enum type_of_constraint {CIRCLE, RIGID, FIXED, CYLINDER, NORMAL};
@@ -102,7 +104,6 @@ public :
     float rho;
     fptr func; // function for force accumulation
     bool isEnode; //for checking if the node is a special Enode
-    node * linear_search(float s, node* rootNode); //finds node to right of material coordinate
 };
 
 class display_node { //only for displaying, no state copies

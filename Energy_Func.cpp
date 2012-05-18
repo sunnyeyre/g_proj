@@ -183,7 +183,7 @@ L1node* pendulum_update(L1node * old_node) {
     return new_node;
 }
 */
-node * node::linear_search(float s, node* rootNode) {
+node * linear_search(float s, node* rootNode) {
 // given an s and its old rightmost node, find interval [s0, s1] and return Lnode with s0
    
     int i = floor(s * NUM);
@@ -191,7 +191,7 @@ node * node::linear_search(float s, node* rootNode) {
     if(abs((float) i - s*NUM) < 0.0001) {
         j = i+1;
     }
-    
+   
     node * iterator = rootNode;
     while(abs(iterator->material_coordinate - (float)j/(float)NUM) > 0.0001)
         iterator = iterator->right;
@@ -351,7 +351,7 @@ void E0node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, rese
 }
 void E3node::force_accumulate(Vector4f& q0, Vector4f& q1) { //gravity only, resets force every time
 	
-    Vector3f gravity = Vector3f(0, g, 0);
+    Vector3f gravity = Vector3f(0, -g, 0);
     float constant = rho / 2.0;
 //    float deltas = s1_node->material_coordinate - s0_node->material_coordinate;
 //    Vector3f x0_plus_x1 = Vector3f(*(s1_node->world_x) + *(s0_node->world_x));
@@ -574,16 +574,15 @@ E0node* E0node::update() {
 	
 	M << -deltax[0], -deltax[1], -deltax[2], -2*deltax[0], -2*deltax[1], -2*deltax[2], mss, 2*mss,
       1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0;
-    
     M /= rho/6.0;
 
         // input right hand matrix, M*q0 + dt*force
 
     Vector2f SDot(sdot, 1.0);
 
-    VectorXf rhs = M * SDot + dt * *force;
+    VectorXf rhs = M * SDot + dt * *force;;
 
-        // inverting the M matrix using JacobiSVD
+    // inverting the M matrix using JacobiSVD
     JacobiSVD<MatrixXf> svd(M, ComputeThinU | ComputeThinV);
         // save the result in qDotNew
     Vector2f qDotNew = svd.solve(rhs);
@@ -607,8 +606,8 @@ E0node* E0node::update() {
     newNode->rho = 2.0;
     
     Vector3f gravity = Vector3f(0, -g, 0);
-    L3node* leftPart = dynamic_cast<L3node *> (s0_node)->updateLeft(xNew, xDotNew, qNew, gravity);
-    L3node* rightPart = dynamic_cast<L3node *> (s1_node)->updateRight(xNew, xDotNew, 1.0-qNew,gravity);
+    L3node* leftPart = dynamic_cast<L3node *> (s0_node)->updateLeft(xNew, xDotNew, alpha, gravity);
+    L3node* rightPart = dynamic_cast<L3node *> (s1_node)->updateRight(xNew, xDotNew, 1.0-alpha,gravity);
     leftPart->right = rightPart;
     rightPart->left = leftPart;
     node* root = leftPart;

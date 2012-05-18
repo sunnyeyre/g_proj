@@ -10,6 +10,7 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Cholesky>
+#include <Eigen/LU>
 
 #ifdef OSX
 #include <GLUT/glut.h>
@@ -29,6 +30,8 @@
 #define PI 3.14159265
 #define g 9.80665 // acceleration due to gravity
 #define l 2 //length of pendulum
+#define ks 8.0 //spring constant and length of string
+#define kd 2.0 // damping constant of spring
 
 using namespace Eigen;
 using namespace std;
@@ -59,6 +62,7 @@ State* present_state;
 float radius = 0.05;
 float win_x, win_y, win_z;
 float dt = 1.0/80.0;
+extern float l0;
 int main_window;
 extern int NUM; //number of Lagrangian nodes in between the 2 rigid nodes
 
@@ -71,6 +75,7 @@ int iter = 0;
 extern L1node* pendulum_update(L1node * old_node);
 extern L3node* string_update(L3node * old_node);
 extern E3node* mass_node(E3node * old_node);
+extern node* linear_search(float s, node* rootNode);
 
 void advanceT(int value) { //jump to the next state every 5 ms
     
@@ -80,70 +85,212 @@ void advanceT(int value) { //jump to the next state every 5 ms
 
 State * takeastep(State * previous_state) { // calculates the next state in the simulation
                                             // this is where the node::update funcs are called    
- State * state = new State;
+
+   State * state = new State;
+
+   float deltas;
+   node * ptr = previous_state->root->right;
+   MatrixXf M = MatrixXf::Zero(3*(NUM-2)+1, 3*(NUM-2)+1);
+   for(int i=0; i<3*(NUM-2); i+=3) {
+
+      // diagonal entryies = 2*deltas, off diagonal = deltas
+         deltas = ptr->right->material_coordinate - ptr->material_coordinate;
+         M(i,i) += 2*deltas;
+         M(i,i+1) += 2*deltas;
+         M(i,i+2) += 2*deltas;
+         M(i+1,i) += 2*deltas;
+         M(i+2,i) += 2*deltas;
+         M(i+1,i+1) += 2*deltas;
+         M(i+1,i+2) += 2*deltas;
+         M(i+1,i+2) += 2*deltas;
+         M(i+2,i+2) += 2*deltas;
+
+         if(i == 3*(NUM-3))
+            break;
+
+         M(i+3, i) += deltas;
+         M(i+3, i+1) += deltas;
+         M(i+3, i+2) += deltas;
+         M(i+4, i) += deltas;
+         M(i+5, i) += deltas;
+         M(i+4, i+1) += deltas;
+         M(i+4, i+1) += deltas;
+         M(i+4, i+1) += deltas;
+         M(i+5, i+2) += deltas;
+
+         M(i, i+3) = deltas;
+         M(i+1, i+3) = deltas;
+         M(i+2, i+3) = deltas;
+         M(i, i+4) = deltas;
+         M(i, i+5) = deltas;
+         M(i+1, i+4) = deltas;
+         M(i+1, i+4) = deltas;
+         M(i+1, i+4) = deltas;
+         M(i+2, i+5) = deltas;
+
+         M(i+3, i+3) += 2*deltas;
+         M(i+3, i+4) += 2*deltas;
+         M(i+3, i+5) += 2*deltas;
+         M(i+4, i+3) += 2*deltas;
+         M(i+5, i+3) += 2*deltas;
+         M(i+4, i+4) += 2*deltas;
+         M(i+4, i+5) += 2*deltas;
+         M(i+5, i+4) += 2*deltas;
+         M(i+5, i+5) += 2*deltas;
+
+         ptr = ptr->right;
+         i+=3;
+   }
+   
+   node * right_of_e0 = linear_search(previous_state->e1->material_coordinate, previous_state->root);
+   
+   float alpha = (previous_state->e1->material_coordinate - right_of_e0->left->material_coordinate)/(right_of_e0->material_coordinate - right_of_e0->left->material_coordinate);
+   Vector3f deltax = *(right_of_e0->world_x)-*(right_of_e0->left->world_x);
+   float mss = deltax.dot(deltax)/(right_of_e0->material_coordinate - right_of_e0->left->material_coordinate);
+
+   M(3*(NUM-2), 3*(NUM-2)) = 2*mss;
+   M(3*(NUM-2)-3, 3*(NUM-2)) += -deltax.x();
+   M(3*(NUM-2)-2, 3*(NUM-2)) += -deltax.y();
+   M(3*(NUM-2)-1, 3*(NUM-2)) += -deltax.z();
+
+   M(3*(NUM-2), 3*(NUM-2)-3) += -deltax.x();
+   M(3*(NUM-2), 3*(NUM-2)-2) += -deltax.y();
+   M(3*(NUM-2), 3*(NUM-2)-1) += -deltax.z();
+
+   // force term : taking into account of gravity and spring potential energy
+   VectorXf f = VectorXf(3*(NUM-2)+1);
+   VectorXf qOldDot = VectorXf(3*(NUM-2)+1);
+   VectorXf qOld = VectorXf(3*(NUM-2)+1);
+   ptr = previous_state->root->right;
+   Vector3f deltaXDotRight, deltaXDotLeft, deltaXRight, deltaXLeft, constant;
+   float absDeltaXRight, absDeltaXLeft, restLengthRight, restLengthLeft;
+
+   for(int i=0; i<3*(NUM-2); i+=3 ) {
+
+      //putting in old values for Euler integration
+      qOldDot[i] = ptr->world_x_dot->x();
+      qOldDot[i+1] = ptr->world_x_dot->y();
+      qOldDot[i+2] = ptr->world_x_dot->z();
+
+      qOld[i] = ptr->world_x->x();
+      qOld[i+1] = ptr->world_x->y();
+      qOld[i+2] = ptr->world_x->z();
+
+      //gravity
+      f[i+1] = -g * ptr->rho * (ptr->material_coordinate - ptr->left->material_coordinate);
+
+      //spring
+      if(ptr != right_of_e0->left && ptr != right_of_e0) { //normal case
+
+         deltaXDotRight = *(ptr->world_x_dot) - *(ptr->right->world_x_dot);
+         deltaXDotLeft = *(ptr->world_x_dot) - *(ptr->left->world_x_dot);
+         deltaXRight = *(ptr->world_x) - *(ptr->right->world_x);
+         deltaXLeft = *(ptr->world_x) - *(ptr->left->world_x);
+
+         absDeltaXRight = sqrt(deltaXRight.dot(deltaXRight));
+         absDeltaXLeft = sqrt(deltaXLeft.dot(deltaXLeft));
+
+         constant = -(ks * (absDeltaXLeft - l0) + kd * deltaXDotLeft.dot(deltaXLeft)/absDeltaXLeft)*deltaXLeft/absDeltaXLeft - (ks * (absDeltaXRight - l0) + kd * deltaXDotRight.dot(deltaXRight)/absDeltaXRight)*deltaXRight/absDeltaXRight;
+         
+      }
+      else if(ptr == right_of_e0->left) { //ball's left node is ptr
+
+         deltaXDotRight = *(ptr->world_x_dot) - *(previous_state->e1->world_x_dot);
+         deltaXDotLeft = *(ptr->world_x_dot) - *(ptr->left->world_x_dot);
+         deltaXRight = *(ptr->world_x) - *(previous_state->e1->world_x);
+         deltaXLeft = *(ptr->world_x) - *(ptr->left->world_x);
+         restLengthRight = l0 * alpha;
+         restLengthRight = l0;
+         
+         if(deltaXRight.dot(deltaXRight) < 0.001) {
+            deltaXDotRight = *(ptr->world_x_dot) - *(ptr->right->world_x_dot);
+            deltaXRight = *(ptr->world_x) - *(ptr->right->world_x);
+            restLengthLeft = l0;
+         }
+         
+         absDeltaXRight = sqrt(deltaXRight.dot(deltaXRight));
+         absDeltaXLeft = sqrt(deltaXLeft.dot(deltaXLeft));          
+         constant = -(ks * (absDeltaXLeft - restLengthLeft) + kd * deltaXDotLeft.dot(deltaXLeft)/absDeltaXLeft)*deltaXLeft/absDeltaXLeft - (ks * (absDeltaXRight - restLengthRight) + kd * deltaXDotRight.dot(deltaXRight)/absDeltaXRight)*deltaXRight/absDeltaXRight;
+      }
+      else if(ptr == right_of_e0) { //ball's right node is ptr
+         deltaXDotLeft = *(ptr->world_x_dot) - *(previous_state->e1->world_x_dot);
+         deltaXDotRight = *(ptr->world_x_dot) - *(ptr->right->world_x_dot);
+         deltaXLeft = *(ptr->world_x) - *(previous_state->e1->world_x);
+         deltaXRight = *(ptr->world_x) - *(ptr->right->world_x);
+         restLengthLeft = l0 * alpha;
+         restLengthRight = l0;
+         
+         if(deltaXLeft.dot(deltaXLeft) < 0.001) {
+            deltaXDotLeft = *(ptr->world_x_dot) - *(ptr->left->world_x_dot);
+            deltaXLeft = *(ptr->world_x) - *(ptr->left->world_x);
+            restLengthLeft = l0;
+         }
+         
+         absDeltaXLeft = sqrt(deltaXLeft.dot(deltaXLeft));
+         absDeltaXRight = sqrt(deltaXRight.dot(deltaXRight));
+         constant = -(ks * (absDeltaXLeft - restLengthLeft) + kd * deltaXDotLeft.dot(deltaXLeft)/absDeltaXLeft)*deltaXLeft/absDeltaXLeft - (ks * (absDeltaXRight - restLengthRight) + kd * deltaXDotRight.dot(deltaXRight)/absDeltaXRight)*deltaXRight/absDeltaXRight;
+      }
+      
+      f[i] += constant.x();
+      f[i+1] += constant.y();
+      f[i+2] += constant.z();
+
+      ptr = ptr->right;
+   }
+
+
+   Vector3f x0_and_x1= (1-alpha)* *(right_of_e0->left->world_x) + alpha* *(right_of_e0->world_x);
+    f[3*(NUM-2)] = previous_state->e1->rho * x0_and_x1.dot(Vector3f(0,-g,0)); 
+
+   VectorXf rhs = M * qOldDot +  dt * f;
+
+   VectorXf qNewDot = M.inverse() * rhs;
+
+   VectorXf qNew = qNewDot * dt + qOld;
+
+   L3node * newRoot = new L3node(0.0, *(previous_state->root->world_x), *(previous_state->root->world_x_dot));
+   state->root = newRoot;
+   node * newPtr = state->root;
+   ptr = previous_state->root->right;
+
+   Vector3f newX, newXDot;
+
+   //update the new state
+   for(int i=0; i<3*(NUM-2); i+=3) {
+
+      newX = Vector3f(qNew[i], qNew[i+1], qNew[i+2]);
+      newXDot = Vector3f(qNewDot[i], qNewDot[i+1], qNewDot[i+2]);
+      
+      L3node * newNode = new L3node(ptr->material_coordinate, newX, newXDot);
+      
+      newPtr->right = newNode;
+      newPtr->right->left = newPtr;
+      
+      ptr = ptr->right;
+      newPtr = newPtr->right;
+   }
+
+   cout << "qNew : " << qNew[3*(NUM-2)] << endl;
+
+   right_of_e0 = linear_search(qNew[3*(NUM-2)], newRoot);
+   alpha = (qNew[3*(NUM-2)] - right_of_e0->left->material_coordinate) / (right_of_e0->material_coordinate - right_of_e0->left->material_coordinate);
+   newX = (1.0-alpha) * *(right_of_e0->left->world_x) + alpha * *(right_of_e0->world_x);
+   newXDot = (1.0-alpha) * *(right_of_e0->left->world_x_dot) + alpha * *(right_of_e0->world_x_dot);
+
+   E0node * newE = new E0node(qNew[3*(NUM-2)], qNewDot[3*(NUM-2)], newX, newXDot, newRoot);
+   newE->rho = 2.0;
+   state->e1 = newE;
+   state->next = NULL;
+   return state;
+
+ /*
 // state->e1 = dynamic_cast<E3node *> (previous_state->e1)->update();
  //state->e1 = dynamic_cast<L3node *> (previous_state->e1)->update();
  state->e1 = dynamic_cast<E0node *> (previous_state->e1)->update();
  state->root = dynamic_cast<E0node *> (state->e1)->rootNode;
  state->next = NULL;
  return state;
-
-//    State * state = new State;
-//    L3node * ptr = present_state->root;
-//    E1node * interesting_node = dynamic_cast<E1node*> (present_state->e1);
-//    L3node * right_of_e1, prev_node;
-//    double s0, s1;
-//    
-//    while(ptr->right != NULL) { //linearly traverse and finds [s0,s1] for E1node, adds mg to 
-//                                // these 2 nodes
-//        if(interesting_node->material_coordinate >= ptr->material_coordinate && 
-//           interesting_node->material_coordinate <= ptr->right->material_coordinate) {
-//            
-//            s0 = ptr->material_coordinate;
-//            s1 = ptr->right->material_coordinate;
-//            
-//            right_of_e1 = ptr->right;
-//                //        ptr = ptr->update(-mg);
-//                //    right_of_e1 = right_of_e1->update(-mg);
-//            ptr->right = right_of_e1;
-//            right_of_e1->left = ptr;
-//            
-//            while(ptr->left != NULL) {
-//                prev_node = ptr;
-//                ptr= ptr->left;
-//                    //    ptr = ptr->update(0);
-//                prev_node->left = ptr;
-//                ptr->right = prev_node;
-//            }
-//            
-//            while(right_of_e1->right != NULL) {
-//                prev_node = right_of_e1;
-//                right_of_e1 = right_of_e1->right;
-//                    //               right_of_e1 = right_of_e1->udpate(0);
-//                prev_node->right = right_of_e1;
-//                right_of_e1->left = prev_node;
-//            }
-//
-//                //    interesting_node= interesting_node->update(ptr, ptr->right);
-//            
-//            right_of_e1->right = interesting_node;
-//            interesting_node->left = right_of_e1;
-//            
-//            break; //found interval, break out of while loop
-//        }
-//        else
-//            ptr = ptr->right;
-//    }
-//    
-//    if(ptr->left != NULL) {
-//        printf("error! interval was never found\n");
-//        return NULL;
-//    }
-//    
-//    state->root = ptr;
-//   
-//    state->next = NULL;
-//    return state;
+*/
 
 }
 
@@ -151,8 +298,8 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
 
     State * prevState = NULL;
 //    if(prevState != NULL && abs(present_state->e1->material_coordinate - prevState->e1->material_coordinate) < 0.001 ) {
-//      if(iter > 10000) {
-       if(present_state->e1->material_coordinate > 0.99){
+      if(iter > 20) {
+ //      if(present_state->e1->material_coordinate > 0.99){
         present_state->next = initial_state;
        
         glutTimerFunc(1, advanceT, 0);
@@ -269,7 +416,7 @@ void display_lines() { //connects all the lines using all nodes
     
     node* ptr = present_state->root;
     node* e1 = present_state->e1;
-    node* left_of_e1 = (ptr->linear_search(e1->material_coordinate, ptr))->left;
+    node* left_of_e1 = (linear_search(e1->material_coordinate, ptr))->left;
     glVertex3f(ptr->world_x->operator[](0),ptr->world_x->operator[](1),ptr->world_x->operator[](2));
     
     while(ptr->right->right != NULL) {
@@ -295,7 +442,7 @@ void display_nodes() { //display all massless nodes as spheres
     
     node * ptr = present_state->root;
     node* e1 = present_state->e1;
-    node* left_of_e1 = (ptr->linear_search(e1->material_coordinate, ptr))->left;
+    node* left_of_e1 = (linear_search(e1->material_coordinate, ptr))->left;
 
     glTranslatef(ptr->world_x->operator[](0), ptr->world_x->operator[](1), ptr->world_x->operator[](2));
     glutSolidSphere(radius, 20, 20);
