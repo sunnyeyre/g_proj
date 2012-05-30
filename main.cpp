@@ -90,8 +90,8 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
 
    float deltas;
    node * ptr = previous_state->root->right;
-   MatrixXf M = MatrixXf::Zero(3*(NUM-2)+1, 3*(NUM-2)+1); //genralized mass matrix for the entire system
-   for(int i=0; i<3*(NUM-2); i+=3) {
+   MatrixXf M = MatrixXf::Zero(3*(NUM-1)+1, 3*(NUM-1)+1); //genralized mass matrix for the entire system
+   for(int i=0; i<3*(NUM-1); i+=3) {
 
       // diagonal entryies = 2*deltas, off diagonal = deltas
          deltas = ptr->right->material_coordinate - ptr->material_coordinate;
@@ -105,7 +105,7 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
          M(i+1,i+2) += 2*deltas;
          M(i+2,i+2) += 2*deltas;
 
-         if(i == 3*(NUM-3))
+         if(i == 3*(NUM-2))
             break;
 
          M(i+3, i) += deltas;
@@ -148,24 +148,24 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
    Vector3f deltax = *(right_of_e0->world_x)-*(right_of_e0->left->world_x);
    float mss = deltax.dot(deltax)/(right_of_e0->material_coordinate - right_of_e0->left->material_coordinate);
 
-   M(3*(NUM-2), 3*(NUM-2)) = 2*mss;
-   M(3*(NUM-2)-3, 3*(NUM-2)) += -deltax.x();
-   M(3*(NUM-2)-2, 3*(NUM-2)) += -deltax.y();
-   M(3*(NUM-2)-1, 3*(NUM-2)) += -deltax.z();
+   M(3*(NUM-1), 3*(NUM-1)) = 2*mss;
+   M(3*(NUM-1)-3, 3*(NUM-1)) += -deltax.x();
+   M(3*(NUM-1)-2, 3*(NUM-1)) += -deltax.y();
+   M(3*(NUM-1)-1, 3*(NUM-1)) += -deltax.z();
 
-   M(3*(NUM-2), 3*(NUM-2)-3) += -deltax.x();
-   M(3*(NUM-2), 3*(NUM-2)-2) += -deltax.y();
-   M(3*(NUM-2), 3*(NUM-2)-1) += -deltax.z();
+   M(3*(NUM-1), 3*(NUM-1)-3) += -deltax.x();
+   M(3*(NUM-1), 3*(NUM-1)-2) += -deltax.y();
+   M(3*(NUM-1), 3*(NUM-1)-1) += -deltax.z();
 
    // force term : taking into account of gravity and spring potential energy
-   VectorXf f = VectorXf(3*(NUM-2)+1);
-   VectorXf qOldDot = VectorXf(3*(NUM-2)+1);
-   VectorXf qOld = VectorXf(3*(NUM-2)+1);
+   VectorXf f = VectorXf(3*(NUM-1)+1);
+   VectorXf qOldDot = VectorXf(3*(NUM-1)+1);
+   VectorXf qOld = VectorXf(3*(NUM-1)+1);
    ptr = previous_state->root->right;
    Vector3f deltaXDotRight, deltaXDotLeft, deltaXRight, deltaXLeft, constant;
    float absDeltaXRight, absDeltaXLeft, restLengthRight, restLengthLeft;
 
-   for(int i=0; i<3*(NUM-2); i+=3 ) {
+   for(int i=0; i<3*(NUM-1); i+=3 ) {
 
       //putting in old values for Euler integration
       qOldDot[i] = ptr->world_x_dot->x();
@@ -235,14 +235,13 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
       f[i+1] += constant.y();
       f[i+2] += constant.z();
 
+      f[i] = 0.0; f[i+2] = 0.0;
       ptr = ptr->right;
    }
 
-   cout << "sanity check... qOldDot : " << qOldDot << "qOld: " << qOld << "f: " << f << endl;
-
 
    Vector3f x0_and_x1= (1-alpha)* *(right_of_e0->left->world_x) + alpha* *(right_of_e0->world_x);
-    f[3*(NUM-2)] = previous_state->e1->rho * x0_and_x1.dot(Vector3f(0,-g,0)); 
+    f[3*(NUM-1)] = previous_state->e1->rho * x0_and_x1.dot(Vector3f(0,-g,0)); 
 
    VectorXf rhs = M * qOldDot +  dt * f;
    VectorXf qNewDot;
@@ -260,7 +259,7 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
    Vector3f newX, newXDot;
 
    //update the new state
-   for(int i=0; i<3*(NUM-2); i+=3) {
+   for(int i=0; i<3*(NUM-1); i+=3) {
 
       newX = Vector3f(qNew[i], qNew[i+1], qNew[i+2]);
       newXDot = Vector3f(qNewDot[i], qNewDot[i+1], qNewDot[i+2]);
@@ -274,13 +273,17 @@ State * takeastep(State * previous_state) { // calculates the next state in the 
       newPtr = newPtr->right;
    }
 
- cout << "qNew : " << qNew << "qDotNew: " << qNewDot << endl;
-   right_of_e0 = linear_search(qNew[3*(NUM-2)], newRoot);
-   alpha = (qNew[3*(NUM-2)] - right_of_e0->left->material_coordinate) / (right_of_e0->material_coordinate - right_of_e0->left->material_coordinate);
+   L3node* rightNode = new L3node(1.0, *(ptr->world_x), *(ptr->world_x_dot));
+   newPtr->right = rightNode;
+   newPtr->right->left = newPtr;
+
+   cout << "qNew : " << qNew << "qDotNew: " << qNewDot << endl;
+   right_of_e0 = linear_search(qNew[3*(NUM-1)], newRoot);
+   alpha = (qNew[3*(NUM-1)] - right_of_e0->left->material_coordinate) / (right_of_e0->material_coordinate - right_of_e0->left->material_coordinate);
    newX = (1.0-alpha) * *(right_of_e0->left->world_x) + alpha * *(right_of_e0->world_x);
    newXDot = (1.0-alpha) * *(right_of_e0->left->world_x_dot) + alpha * *(right_of_e0->world_x_dot);
 
-   E0node * newE = new E0node(qNew[3*(NUM-2)], qNewDot[3*(NUM-2)], newX, newXDot, newRoot);
+   E0node * newE = new E0node(qNew[3*(NUM-1)], qNewDot[3*(NUM-1)], newX, newXDot, newRoot);
    newE->rho = 2.0;
    state->e1 = newE;
    state->next = NULL;
@@ -301,7 +304,7 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
 
     State * prevState = NULL;
 //    if(prevState != NULL && abs(present_state->e1->material_coordinate - prevState->e1->material_coordinate) < 0.001 ) {
-      if(iter > 20) {
+      if(iter > 50) {
  //      if(present_state->e1->material_coordinate > 0.99){
         present_state->next = initial_state;
        
@@ -317,7 +320,7 @@ void buildFrames(){ //builds frames into a cyclic finite state machine
        
         present_state = present_state->next;
         
- //       buildFrames();
+        buildFrames();
     }
 }
 
